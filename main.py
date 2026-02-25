@@ -41,7 +41,7 @@ def get_rates():
 async def cmd_start(message: types.Message):
     # Приветствие без лишних ID, только чистый курс
     rates = get_rates()
-    await message.answer(f"✅ Бот запущен в оя!\n\n{rates}", parse_mode="Markdown")
+    await message.answer(f"✅ Хелоу Ворлд! Сегодня\n\n{rates}", parse_mode="Markdown")
 
 async def send_scheduled_msg():
     if ADMIN_ID:
