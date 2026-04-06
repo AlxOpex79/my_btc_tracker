@@ -1,65 +1,52 @@
 import os
 import asyncio
-import logging
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
+from aiogram import Bot, Dispatcher
+from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import requests
 
-# Настройки
+# Берем данные из настроек Render (Environment Variables)
 API_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_ID = os.getenv('ADMIN_ID')
+USER_ID = os.getenv('USER_ID')
 
-logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
-scheduler = AsyncIOScheduler()
+scheduler = AsyncIOScheduler(timezone="Europe/Kyiv")
 
-def get_rates():
+# Функция получения курса
+def get_btc_price():
     try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,uah&include_24hr_change=true"
-        res = requests.get(url, timeout=10).json()
-        btc = res['bitcoin']
-        
-        usd_p = btc['usd']
-        uah_p = btc['uah']
-        change = btc['usd_24h_change']
-        
-        emoji = "📈" if change > 0 else "📉"
-        plus = "+" if change > 0 else ""
-        
-        return (
-            f"📊 **Курс Bitcoin**\n"
-            f"-------------------\n"
-            f"💵 USD: ${usd_p:,}\n"
-            f"₴ UAH: {uah_p:,} грн\n"
-            f"-------------------\n"
-            f"{emoji} Изм. за сутки: {plus}{change:.2f}%"
-        )
-    except Exception as e:
-        logging.error(f"Ошибка API: {e}")
-        return "⚠️ Не удалось обновить курс."
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+        data = requests.get(url).json()
+        return data['bitcoin']['usd']
+    except: return None
 
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    rates = get_rates()
-    await message.answer(f"✅ Бот мониторинга активен!\n\n{rates}", parse_mode="Markdown")
+# Сама рассылка
+async def send_price_update():
+    price = get_btc_price()
+    if price:
+        await bot.send_message(USER_ID, f"📊 Курс BTC: ${price:,}")
 
-async def send_scheduled_msg():
-    if ADMIN_ID:
-        try:
-            await bot.send_message(ADMIN_ID, get_rates(), parse_mode="Markdown")
-        except Exception as e:
-            logging.error(f"Ошибка рассылки: {e}")
+# Простейший веб-сервер для Render
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+app = web.Application()
+app.router.add_get("/", handle)
 
 async def main():
-    # 07:00 UTC = 09:00 по нашему
-    # 19:00 UTC = 21:00 по нашему
-    scheduler.add_job(send_scheduled_msg, "cron", hour=7, minute=0)
-    scheduler.add_job(send_scheduled_msg, "cron", hour=19, minute=0)
-    
+    # Настройка расписания
+    scheduler.add_job(send_price_update, 'cron', hour=9, minute=0)
+    scheduler.add_job(send_price_update, 'cron', hour=21, minute=0)
     scheduler.start()
+
+    # Запуск веб-сервера и бота одновременно
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', int(os.getenv("PORT", 10000)))
+    await site.start()
+    
     await dp.start_polling(bot)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(main())
